@@ -3,10 +3,15 @@
 ## Overview
 AI-powered phone agent prototype. Handles incoming calls via Twilio, uses Groq (Llama 3.3 70B) for conversation, and routes callers appropriately.
 
+## Deployment
+- **Production:** https://ai-voice-agent-a4bq.onrender.com (Render, free tier)
+- **GitHub:** https://github.com/gpresearch2025/ai-voice-agent (public)
+- **Local dev:** `python main.py` → http://localhost:8001
+
 ## Tech Stack
-- **Python 3.10+** / **FastAPI** / **uvicorn**
+- **Python 3.13** / **FastAPI** / **uvicorn**
 - **Groq** (Llama 3.3 70B) — AI brain (free tier)
-- **Twilio** — telephony (trial account)
+- **Twilio** — telephony (trial account, number: +18555380806)
 - **aiosqlite** — call logging
 - **pydantic-settings** — config from `.env`
 
@@ -24,17 +29,18 @@ ai-voice-agent/
 │   ├── agent.py         # Groq AI + sales intent detection
 │   ├── call_manager.py  # In-memory conversation state
 │   └── hours.py         # Business hours checking (timezone-aware)
+├── render.yaml          # Render deployment blueprint
 ├── requirements.txt
 ├── .env                 # API keys (DO NOT commit)
 └── calls.db             # SQLite database (auto-created)
 ```
 
-## Running
+## Running Locally
 ```bash
 pip install -r requirements.txt
 python main.py  # Starts on port 8001
 ```
-Requires ngrok for Twilio webhooks: `ngrok http 8001`
+For local testing with Twilio: `ngrok http 8001`
 
 ## Key Configuration (.env)
 - `GROQ_API_KEY` — from console.groq.com (free)
@@ -67,12 +73,21 @@ Two-layer detection in `services/agent.py`:
 ## Important Notes
 - **Port 8000 is used by Laragon** — this project runs on port 8001
 - **Twilio trial** can only `<Dial>` to Verified Caller IDs (console.twilio.com → Verified Caller IDs)
-- **ngrok free tier** changes URLs on restart — must update Twilio webhooks each time
+- **ngrok free tier** changes URLs on restart — must update Twilio webhooks each time (not needed with Render)
 - `.env` changes require server restart (auto-reload only catches .py file changes)
 - **Delete `__pycache__` folders** if code changes aren't reflected after restart
 - Sales phone number must include country code: `+18326963009` not `+8326963009`
+- **Render free tier** has cold starts (~30s) if the service hasn't been called recently
+- **SQLite on Render** is ephemeral — call logs reset on redeploy. Consider upgrading to PostgreSQL for persistence.
 
-## Twilio Webhook Config
-- A call comes in: `https://<ngrok-url>/voice/incoming` (POST)
-- Call status changes: `https://<ngrok-url>/voice/status` (POST)
+## Twilio Webhook Config (Production)
+- A call comes in: `https://ai-voice-agent-a4bq.onrender.com/voice/incoming` (POST)
+- Call status changes: `https://ai-voice-agent-a4bq.onrender.com/voice/status` (POST)
 - Primary handler fails (optional): TwiML Bin with fallback message
+
+## TODO: Next Tasks
+- [ ] **Build web dashboard** — frontend to view call logs, transcripts, active calls, and manage configuration (business hours, transfer numbers). Consider Next.js or simple HTML/JS served from FastAPI.
+- [ ] Set up TwiML Bin fallback for server-down scenario
+- [ ] Test after-hours voicemail flow
+- [ ] Upgrade to persistent database (PostgreSQL) for Render
+- [ ] Add more natural TTS voice (ElevenLabs or Deepgram)
