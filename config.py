@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     business_hours_end: str = "17:00"
     business_timezone: str = "America/New_York"
 
+    # Dashboard auth (set in .env to protect config edits)
+    dashboard_token: str = ""
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000

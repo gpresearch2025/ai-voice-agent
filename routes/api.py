@@ -1,5 +1,6 @@
 import logging
-from fastapi import APIRouter, HTTPException, Query
+import time
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from groq import AsyncGroq
 
 from config import settings
@@ -10,29 +11,52 @@ from services.call_manager import call_manager
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["REST API"])
 
+# --- Health cache (avoid hammering Groq) ---
+_health_cache: dict = {"result": None, "timestamp": 0}
+HEALTH_CACHE_TTL = 60  # seconds
+
+
+def _require_token(authorization: str | None = Header(None)):
+    """Dependency: verify dashboard token on protected endpoints."""
+    token = settings.dashboard_token
+    if not token:
+        return  # no token configured = open access
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization required")
+    if authorization[7:] != token:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
 
 @router.get("/health")
 async def health_check():
-    """System health check with connectivity status."""
+    """System health check with cached Groq connectivity."""
+    now = time.time()
+    groq_result = None
+
+    # Use cached Groq result if fresh
+    if _health_cache["result"] and (now - _health_cache["timestamp"]) < HEALTH_CACHE_TTL:
+        groq_result = _health_cache["result"]
+    else:
+        try:
+            client = AsyncGroq(api_key=settings.groq_api_key)
+            await client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=5,
+            )
+            groq_result = "connected"
+        except Exception as e:
+            groq_result = f"error: {str(e)}"
+
+        _health_cache["result"] = groq_result
+        _health_cache["timestamp"] = now
+
     health = {
-        "status": "healthy",
-        "groq": "unknown",
+        "status": "healthy" if groq_result == "connected" else "degraded",
+        "groq": groq_result,
         "twilio_configured": bool(settings.twilio_account_sid and settings.twilio_auth_token),
         "active_calls": len(call_manager.get_active_call_sids()),
     }
-
-    # Check Groq connectivity
-    try:
-        client = AsyncGroq(api_key=settings.groq_api_key)
-        await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=5,
-        )
-        health["groq"] = "connected"
-    except Exception as e:
-        health["groq"] = f"error: {str(e)}"
-        health["status"] = "degraded"
 
     return health
 
@@ -41,9 +65,11 @@ async def health_check():
 async def list_calls(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    status: str | None = Query(None),
+    search: str | None = Query(None),
 ):
-    """Paginated list of call records."""
-    calls = await get_calls(limit=limit, offset=offset)
+    """Paginated list of call records with optional filters."""
+    calls = await get_calls(limit=limit, offset=offset, status=status, search=search)
     return {
         "calls": [call.model_dump() for call in calls],
         "limit": limit,
@@ -82,12 +108,17 @@ async def get_config():
         "twilio_phone_number": settings.twilio_phone_number,
         "groq_key_set": bool(settings.groq_api_key),
         "twilio_configured": bool(settings.twilio_account_sid),
+        "auth_required": bool(settings.dashboard_token),
     }
 
 
 @router.put("/config")
-async def update_config(update: ConfigUpdate):
-    """Update runtime configuration (business hours, transfer numbers)."""
+async def update_config(
+    update: ConfigUpdate,
+    _=Depends(_require_token),
+):
+    """Update runtime configuration (protected by dashboard token)."""
+
     updated_fields = {}
 
     if update.business_hours_start is not None:

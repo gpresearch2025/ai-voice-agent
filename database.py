@@ -46,13 +46,32 @@ async def get_call(call_sid: str) -> CallRecord | None:
         return _row_to_record(row)
 
 
-async def get_calls(limit: int = 50, offset: int = 0) -> list[CallRecord]:
+async def get_calls(
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+    search: str | None = None,
+) -> list[CallRecord]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM calls ORDER BY started_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        )
+        query = "SELECT * FROM calls"
+        params: list = []
+        conditions = []
+
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if search:
+            conditions.append("from_number LIKE ?")
+            params.append(f"%{search}%")
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
         return [_row_to_record(row) for row in rows]
 

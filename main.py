@@ -2,6 +2,8 @@ import logging
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 
 from config import settings
 from database import init_db
@@ -40,11 +42,11 @@ app.include_router(api_router)
 
 @app.get("/")
 async def root():
-    return {
-        "service": "AI Voice Agent",
-        "status": "running",
-        "docs": "/docs",
-    }
+    return RedirectResponse(url="/dashboard/")
+
+
+# Mount static files AFTER routers so /api/* and /voice/* take priority
+app.mount("/dashboard", StaticFiles(directory="static", html=True), name="dashboard")
 
 
 # Fallback TwiML for when server is reachable but encounters unhandled errors

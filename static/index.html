@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Voice Agent Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📞</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <h1>AI Voice Agent Dashboard</h1>
+    </div>
+    <div class="header-right">
+      <span class="last-updated" id="lastUpdated"></span>
+      <span class="health-indicator" id="healthDot" title="System health"></span>
+      <span id="healthLabel">Checking...</span>
+      <span class="badge" id="activeCallsBadge" title="Active calls">0 active</span>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Top row: Status + Config -->
+    <div class="card-row">
+
+      <!-- System Status -->
+      <section class="card" id="statusCard">
+        <h2>System Status</h2>
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="status-label">Groq AI</span>
+            <span class="status-value" id="groqStatus"><span class="spinner"></span></span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Twilio</span>
+            <span class="status-value" id="twilioStatus"><span class="spinner"></span></span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Active Calls</span>
+            <span class="status-value" id="activeCalls"><span class="spinner"></span></span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Overall</span>
+            <span class="status-value" id="overallStatus"><span class="spinner"></span></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Configuration -->
+      <section class="card" id="configCard">
+        <h2>Configuration</h2>
+        <form id="configForm" class="config-form">
+          <div class="form-row">
+            <label for="hoursStart">Business Hours Start</label>
+            <input type="text" id="hoursStart" placeholder="09:00">
+          </div>
+          <div class="form-row">
+            <label for="hoursEnd">Business Hours End</label>
+            <input type="text" id="hoursEnd" placeholder="17:00">
+          </div>
+          <div class="form-row">
+            <label for="timezone">Timezone</label>
+            <input type="text" id="timezone" placeholder="America/Chicago">
+          </div>
+          <div class="form-row">
+            <label for="salesNumber">Sales Transfer Number</label>
+            <input type="text" id="salesNumber" placeholder="+18326963009">
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+            <span id="configMsg" class="config-msg"></span>
+          </div>
+        </form>
+      </section>
+
+    </div>
+
+    <!-- Call Log -->
+    <section class="card" id="callLogCard">
+      <div class="card-header-row">
+        <h2>Call Log</h2>
+        <div class="call-controls">
+          <input type="text" id="searchInput" class="search-input" placeholder="Search phone number...">
+          <select id="statusFilter" class="status-filter">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="completed">Completed</option>
+            <option value="transferred">Transferred</option>
+            <option value="voicemail">Voicemail</option>
+          </select>
+          <div class="pagination">
+            <button class="btn btn-sm" id="prevPage" disabled>&larr; Prev</button>
+            <span id="pageInfo">Page 1</span>
+            <button class="btn btn-sm" id="nextPage">Next &rarr;</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="callTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>From</th>
+              <th>Status</th>
+              <th>Duration</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="callTableBody">
+            <tr><td colspan="5" class="empty-msg"><span class="spinner"></span> Loading calls...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Transcript Modal -->
+    <div class="modal-backdrop" id="modalBackdrop">
+      <div class="modal" id="transcriptModal">
+        <div class="modal-header">
+          <h3 id="modalTitle">Call Transcript</h3>
+          <button class="btn-close" id="modalClose">&times;</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+      </div>
+    </div>
+
+    <!-- Auth Modal -->
+    <div class="modal-backdrop" id="authBackdrop">
+      <div class="modal modal-sm">
+        <div class="modal-header">
+          <h3>Dashboard Token Required</h3>
+          <button class="btn-close" id="authClose">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="auth-desc">Enter the dashboard token to save configuration changes.</p>
+          <form id="authForm">
+            <input type="password" id="authToken" class="auth-input" placeholder="Enter token..." autocomplete="off">
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Authenticate</button>
+              <span id="authMsg" class="config-msg"></span>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
