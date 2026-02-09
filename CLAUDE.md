@@ -18,17 +18,21 @@ AI-powered phone agent prototype. Handles incoming calls via Twilio, uses Groq (
 ## Project Structure
 ```
 ai-voice-agent/
-├── main.py              # FastAPI entry point, lifespan, routers
+├── main.py              # FastAPI entry point, lifespan, routers, static mount
 ├── config.py            # Pydantic settings from .env
 ├── models.py            # CallRecord, CallStatus, ConfigUpdate
-├── database.py          # Async SQLite CRUD (aiosqlite)
+├── database.py          # Async SQLite CRUD (aiosqlite) with search/filter
 ├── routes/
 │   ├── voice.py         # 4 Twilio webhook endpoints
-│   └── api.py           # 6 REST API endpoints
+│   └── api.py           # 6 REST API endpoints (health cached, auth on config)
 ├── services/
 │   ├── agent.py         # Groq AI + sales intent detection
 │   ├── call_manager.py  # In-memory conversation state
 │   └── hours.py         # Business hours checking (timezone-aware)
+├── static/
+│   ├── index.html       # Dashboard page (single-page, no framework)
+│   ├── style.css        # Dark theme styles
+│   └── app.js           # Fetch API data, render UI, auto-refresh
 ├── render.yaml          # Render deployment blueprint
 ├── requirements.txt
 ├── .env                 # API keys (DO NOT commit)
@@ -48,16 +52,29 @@ For local testing with Twilio: `ngrok http 8001`
 - `SALES_PHONE_NUMBER` — must include country code (+1...)
 - `BUSINESS_HOURS_START/END` — 24h format (e.g. 09:00, 17:00)
 - `BUSINESS_TIMEZONE` — e.g. America/Chicago
+- `DASHBOARD_TOKEN` — protects `PUT /api/config` (leave empty for open access)
 - `PORT` — default 8001 (8000 conflicts with Laragon)
 
 ## API Endpoints
-- `GET /api/health` — system health + Groq connectivity
-- `GET /api/calls` — paginated call logs with transcripts
+- `GET /api/health` — system health + Groq connectivity (cached 60s)
+- `GET /api/calls?limit=&offset=&status=&search=` — paginated call logs with filtering
 - `GET /api/calls/active` — currently active calls
-- `GET /api/calls/{call_sid}` — single call detail
-- `GET /api/config` — current configuration
-- `PUT /api/config` — update business hours, transfer numbers at runtime
+- `GET /api/calls/{call_sid}` — single call detail with transcript
+- `GET /api/config` — current configuration (includes `auth_required` flag)
+- `PUT /api/config` — update business hours, transfer numbers (requires `DASHBOARD_TOKEN` if set)
 - `GET /docs` — Swagger UI
+
+## Web Dashboard
+- **URL:** `/` redirects to `/dashboard/` (served as static files from `static/`)
+- **Sections:** system status, config editor, call log table, transcript viewer modal
+- **Features:**
+  - Auto-refresh: health every 10s, calls every 15s
+  - Search by phone number, filter by call status
+  - Live elapsed timer for active calls (pulsing blue dot)
+  - "Last updated" timestamp in header
+  - Auth modal prompts for token on config save (if `DASHBOARD_TOKEN` is set)
+  - All user data escaped to prevent XSS
+- **Tech:** Plain HTML/CSS/JS, no framework, dark theme (#1a1a2e background, #0f9d8c teal accent)
 
 ## Call Flow
 1. **Normal call:** Twilio → `/voice/incoming` → check hours → greeting → `/voice/respond` loop (Groq generates replies)
@@ -86,8 +103,9 @@ Two-layer detection in `services/agent.py`:
 - Primary handler fails (optional): TwiML Bin with fallback message
 
 ## TODO: Next Tasks
-- [ ] **Build web dashboard** — frontend to view call logs, transcripts, active calls, and manage configuration (business hours, transfer numbers). Consider Next.js or simple HTML/JS served from FastAPI.
+- [x] ~~Build web dashboard~~ — done (plain HTML/CSS/JS served from FastAPI)
 - [ ] Set up TwiML Bin fallback for server-down scenario
 - [ ] Test after-hours voicemail flow
 - [ ] Upgrade to persistent database (PostgreSQL) for Render
 - [ ] Add more natural TTS voice (ElevenLabs or Deepgram)
+- [ ] Add dashboard auth for read endpoints (currently only config PUT is protected)

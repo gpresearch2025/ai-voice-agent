@@ -35,6 +35,9 @@ const modalClose = $("#modalClose");
 const lastUpdated = $("#lastUpdated");
 const searchInput = $("#searchInput");
 const statusFilter = $("#statusFilter");
+const callCount = $("#callCount");
+const phoneNumber = $("#phoneNumber");
+const hoursStatus = $("#hoursStatus");
 const authBackdrop = $("#authBackdrop");
 const authClose = $("#authClose");
 const authForm = $("#authForm");
@@ -109,19 +112,24 @@ async function fetchHealth() {
     healthDot.className = "health-indicator " + data.status;
     healthLabel.textContent = data.status === "healthy" ? "Healthy" : "Degraded";
 
+    // Badge: teal when active calls > 0, gray when 0
     activeCallsBadge.textContent = data.active_calls + " active";
+    activeCallsBadge.className = "badge " + (data.active_calls > 0 ? "active" : "inactive");
 
     const groqOk = data.groq === "connected";
-    groqStatus.textContent = groqOk ? "Connected" : "Error";
+    const groqDot = groqOk ? "green" : "red";
+    groqStatus.innerHTML = `<span class="status-dot ${groqDot}"></span>${escapeHtml(groqOk ? "Connected" : "Error")}`;
     groqStatus.className = "status-value " + (groqOk ? "ok" : "err");
 
-    twilioStatus.textContent = data.twilio_configured ? "Configured" : "Not configured";
+    const twilioDot = data.twilio_configured ? "green" : "orange";
+    twilioStatus.innerHTML = `<span class="status-dot ${twilioDot}"></span>${escapeHtml(data.twilio_configured ? "Configured" : "Not configured")}`;
     twilioStatus.className = "status-value " + (data.twilio_configured ? "ok" : "warn");
 
     activeCalls.textContent = data.active_calls;
     activeCalls.className = "status-value";
 
-    overallStatus.textContent = data.status === "healthy" ? "Healthy" : "Degraded";
+    const overallDot = data.status === "healthy" ? "green" : "orange";
+    overallStatus.innerHTML = `<span class="status-dot ${overallDot}"></span>${escapeHtml(data.status === "healthy" ? "Healthy" : "Degraded")}`;
     overallStatus.className = "status-value " + (data.status === "healthy" ? "ok" : "warn");
 
     updateTimestamp();
@@ -152,6 +160,14 @@ async function fetchConfig() {
     $("#hoursEnd").value = originalConfig.business_hours_end;
     $("#timezone").value = originalConfig.business_timezone;
     $("#salesNumber").value = originalConfig.sales_phone_number;
+
+    // Populate status card extras
+    phoneNumber.textContent = data.twilio_phone_number
+      ? formatPhone(data.twilio_phone_number)
+      : "Not set";
+
+    // Check if currently within business hours
+    updateHoursStatus(data.business_hours_start, data.business_hours_end, data.business_timezone);
   } catch {
     console.error("Failed to load config");
   }
@@ -223,6 +239,25 @@ configForm.addEventListener("submit", async (e) => {
   await saveConfig(body);
 });
 
+// === Hours Status ===
+function updateHoursStatus(startStr, endStr, tz) {
+  try {
+    const now = new Date();
+    // Get current time in the business timezone
+    const timeInTz = now.toLocaleTimeString("en-US", {
+      timeZone: tz, hour12: false, hour: "2-digit", minute: "2-digit",
+    });
+    const isOpen = timeInTz >= startStr && timeInTz < endStr;
+    const dot = isOpen ? "green" : "gray";
+    const label = isOpen ? `Open (${startStr}\u2013${endStr})` : `Closed (${startStr}\u2013${endStr})`;
+    hoursStatus.innerHTML = `<span class="status-dot ${dot}"></span>${escapeHtml(label)}`;
+    hoursStatus.className = "status-value " + (isOpen ? "ok" : "dim");
+  } catch {
+    hoursStatus.textContent = `${startStr}\u2013${endStr}`;
+    hoursStatus.className = "status-value dim";
+  }
+}
+
 // === Call Log ===
 function formatTime(isoStr) {
   if (!isoStr) return "--";
@@ -242,7 +277,7 @@ function formatDuration(startStr, endStr) {
   if (!startStr || !endStr) return null;
   try {
     const ms = new Date(endStr) - new Date(startStr);
-    if (ms < 0 || isNaN(ms)) return null;
+    if (ms <= 0 || isNaN(ms)) return null; // 0s = bogus data, show "--"
     return formatMs(ms);
   } catch {
     return null;
@@ -254,6 +289,28 @@ function formatMs(ms) {
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function formatDateOnly(isoStr) {
+  if (!isoStr) return "";
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+function formatTimeOnly(isoStr) {
+  if (!isoStr) return "--";
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return isoStr;
+  }
 }
 
 function formatPhone(num) {
@@ -283,6 +340,9 @@ async function fetchCalls() {
 
     clearActiveTimers();
 
+    // Total count display
+    callCount.textContent = data.count > 0 ? `(${data.count}${data.count >= PAGE_SIZE ? "+" : ""})` : "";
+
     if (data.calls.length === 0) {
       const msg = (search || status) ? "No calls match filters" : "No calls yet";
       callTableBody.innerHTML = `<tr><td colspan="5" class="empty-msg">${escapeHtml(msg)}</td></tr>`;
@@ -292,21 +352,31 @@ async function fetchCalls() {
       return;
     }
 
-    callTableBody.innerHTML = data.calls.map((call, i) => {
+    // Build rows with date separators
+    let lastDate = "";
+    const rows = [];
+    data.calls.forEach((call, i) => {
+      const dateStr = formatDateOnly(call.started_at);
+      if (dateStr && dateStr !== lastDate) {
+        rows.push(`<tr class="date-separator"><td colspan="5">${escapeHtml(dateStr)}</td></tr>`);
+        lastDate = dateStr;
+      }
+
       const isActive = call.status === "active";
       const dur = formatDuration(call.started_at, call.ended_at);
       const durCell = isActive
         ? `<span class="duration-live" id="dur-${i}">0s</span>`
         : escapeHtml(dur || "--");
 
-      return `<tr>
-        <td>${escapeHtml(formatTime(call.started_at))}</td>
+      rows.push(`<tr>
+        <td>${escapeHtml(formatTimeOnly(call.started_at))}</td>
         <td>${escapeHtml(formatPhone(call.from_number))}</td>
         <td><span class="status-badge ${escapeAttr(call.status)}">${escapeHtml(call.status)}</span></td>
         <td>${durCell}</td>
         <td><button class="btn-detail" data-sid="${escapeAttr(call.call_sid)}">View</button></td>
-      </tr>`;
-    }).join("");
+      </tr>`);
+    });
+    callTableBody.innerHTML = rows.join("");
 
     // Start live timers for active calls
     data.calls.forEach((call, i) => {

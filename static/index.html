@@ -47,6 +47,14 @@
             <span class="status-label">Overall</span>
             <span class="status-value" id="overallStatus"><span class="spinner"></span></span>
           </div>
+          <div class="status-item">
+            <span class="status-label">Phone Number</span>
+            <span class="status-value dim" id="phoneNumber">--</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Business Hours</span>
+            <span class="status-value" id="hoursStatus"><span class="spinner"></span></span>
+          </div>
         </div>
       </section>
 
@@ -82,7 +90,7 @@
     <!-- Call Log -->
     <section class="card" id="callLogCard">
       <div class="card-header-row">
-        <h2>Call Log</h2>
+        <h2>Call Log <span class="call-count" id="callCount"></span></h2>
         <div class="call-controls">
           <input type="text" id="searchInput" class="search-input" placeholder="Search phone number...">
           <select id="statusFilter" class="status-filter">
