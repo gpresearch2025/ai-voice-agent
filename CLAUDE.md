@@ -18,10 +18,10 @@ AI-powered phone agent prototype. Handles incoming calls via Twilio, uses Groq (
 ## Project Structure
 ```
 ai-voice-agent/
-├── main.py              # FastAPI entry point, lifespan, routers, static mount
+├── main.py              # FastAPI entry point, lifespan, routers, stale call cleanup task
 ├── config.py            # Pydantic settings from .env
 ├── models.py            # CallRecord, CallStatus, ConfigUpdate
-├── database.py          # Async PostgreSQL CRUD (asyncpg/Neon) with search/filter
+├── database.py          # Async PostgreSQL CRUD (asyncpg/Neon), stale call cleanup
 ├── routes/
 │   ├── voice.py         # 5 Twilio webhook endpoints (incoming, respond, transfer, voicemail, status)
 │   └── api.py           # 6 REST API endpoints (health cached, auth on config)
@@ -48,8 +48,8 @@ For local testing with Twilio: `ngrok http 8001`
 ## Key Configuration (.env)
 - `GROQ_API_KEY` — from console.groq.com (free)
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`
-- `SALES_PHONE_NUMBER` — must include country code (+1...)
-- `SUPPORT_PHONE_NUMBER` — must include country code (+1...), leave empty to disable
+- `SALES_PHONE_NUMBER` — Braydon's number, must include country code (+1...)
+- `SUPPORT_PHONE_NUMBER` — Phong's number, must include country code (+1...), leave empty to disable
 - `BUSINESS_HOURS_START/END` — 24h format (e.g. 09:00, 17:00)
 - `BUSINESS_TIMEZONE` — e.g. America/Chicago
 - `DASHBOARD_TOKEN` — protects `PUT /api/config` (leave empty for open access)
@@ -80,7 +80,7 @@ For local testing with Twilio: `ngrok http 8001`
 ## Call Flow
 1. **Normal call:** Twilio → `/voice/incoming` → check hours → greeting → `/voice/respond` loop (Groq generates replies)
 2. **After hours:** `/voice/incoming` → hours check fails → closed message → `<Record>` voicemail
-3. **Transfer (both numbers set):** caller mentions sales/support topic → Groq returns `[TRANSFER_SALES]` or `[TRANSFER_SUPPORT]` → DTMF menu "Press 1 for Sales. Press 2 for Support." → `/voice/transfer` dials chosen department
+3. **Transfer (both numbers set):** caller mentions sales/support topic → Groq returns `[TRANSFER_SALES]` or `[TRANSFER_SUPPORT]` → DTMF menu "Press 1 for Braydon in Sales. Press 2 for Phong in Support." → `/voice/transfer` dials chosen department
 4. **Transfer (one number set):** direct `<Dial>` to whichever number is configured
 5. **Transfer (neither set):** apologize and hang up
 6. **Server down:** Twilio falls back to TwiML Bin (static XML)
@@ -93,20 +93,22 @@ Two-layer detection in `services/agent.py`:
 ### Transfer Edge Cases
 | Scenario | Behavior |
 |----------|----------|
-| Both numbers set | DTMF menu: "Press 1 for Sales, Press 2 for Support" |
-| Only sales set | Direct dial to sales |
-| Only support set | Direct dial to support |
+| Both numbers set | DTMF menu: "Press 1 for Braydon in Sales, Press 2 for Phong in Support" |
+| Only sales set | Direct dial to Braydon (sales) |
+| Only support set | Direct dial to Phong (support) |
 | Neither set | Apologize message |
-| Invalid digit | Replay menu once, then default to sales |
+| Invalid digit | Replay menu once, then default to Braydon (sales) |
 | No digit (timeout 5s) | Default to detected department |
 
 ## Important Notes
 - **Port 8000 is used by Laragon** — this project runs on port 8001
-- **Twilio trial** can only `<Dial>` to Verified Caller IDs (console.twilio.com → Verified Caller IDs)
+- **Twilio trial** can only `<Dial>` to Verified Caller IDs — **both callers AND transfer targets** must be verified (console.twilio.com → Verified Caller IDs). Inbound calls from unverified numbers get error 21264.
 - **ngrok free tier** changes URLs on restart — must update Twilio webhooks each time (not needed with Render)
 - `.env` changes require server restart (auto-reload only catches .py file changes)
 - **Delete `__pycache__` folders** if code changes aren't reflected after restart
-- Sales phone number must include country code: `+18326963009` not `+8326963009`
+- Phone numbers must include country code: `+18326963009` not `+8326963009`
+- **asyncpg requires `datetime` objects** for `TIMESTAMPTZ` columns — never pass ISO strings directly. Use `_parse_dt()` helper in `database.py`.
+- **Stale call cleanup:** Background task in `main.py` runs every 2 minutes. Calls stuck as "active" for 15+ minutes are auto-closed to "completed". Prevents ghost calls when Twilio status callbacks fail (server restarts, 500 errors, test/curl calls).
 - **Render free tier** has cold starts (~30s) if the service hasn't been called recently
 - **Database** is Neon PostgreSQL (free tier) — call logs persist across Render deploys
 
@@ -115,10 +117,18 @@ Two-layer detection in `services/agent.py`:
 - Call status changes: `https://ai-voice-agent-a4bq.onrender.com/voice/status` (POST)
 - Primary handler fails (optional): TwiML Bin with fallback message
 
+## Agents
+| Agent | Department | Phone | Env Var |
+|-------|-----------|-------|---------|
+| Braydon | Sales | +18326963009 | `SALES_PHONE_NUMBER` |
+| Phong | Support | +18326412959 | `SUPPORT_PHONE_NUMBER` |
+
 ## TODO: Next Tasks
 - [x] ~~Build web dashboard~~ — done (plain HTML/CSS/JS served from FastAPI)
+- [x] ~~Upgrade to persistent database (PostgreSQL) for Render~~ — done (Neon free tier, asyncpg)
+- [x] ~~Add sales + support transfer with DTMF menu~~ — done (Braydon/Phong)
+- [x] ~~Fix stale "active" calls~~ — done (background cleanup every 2min + asyncpg datetime fix)
 - [ ] Set up TwiML Bin fallback for server-down scenario
 - [ ] Test after-hours voicemail flow
-- [x] ~~Upgrade to persistent database (PostgreSQL) for Render~~ — done (Neon free tier, asyncpg)
 - [ ] Add more natural TTS voice (ElevenLabs or Deepgram)
 - [ ] Add dashboard auth for read endpoints (currently only config PUT is protected)
