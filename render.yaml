@@ -15,6 +15,8 @@ services:
         sync: false
       - key: SALES_PHONE_NUMBER
         sync: false
+      - key: SUPPORT_PHONE_NUMBER
+        sync: false
       - key: BUSINESS_HOURS_START
         value: "09:00"
       - key: BUSINESS_HOURS_END
