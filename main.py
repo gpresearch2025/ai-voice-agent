@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+import asyncpg
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -20,12 +21,16 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing database...")
-    await init_db()
+    logger.info("Connecting to PostgreSQL...")
+    pool = await asyncpg.create_pool(settings.database_url, ssl="require")
+    await init_db(pool)
+    app.state.pool = pool
     logger.info("AI Voice Agent ready")
     logger.info(f"Business hours: {settings.business_hours_start}-{settings.business_hours_end} ({settings.business_timezone})")
     logger.info(f"Sales transfer: {settings.sales_phone_number}")
     yield
+    await pool.close()
+    logger.info("Database pool closed")
 
 
 app = FastAPI(

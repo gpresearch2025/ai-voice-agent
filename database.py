@@ -1,49 +1,55 @@
 import json
-import aiosqlite
+import asyncpg
 from models import CallRecord, CallStatus
-from config import settings
 
-DB_PATH = settings.database_path
+# Module-level pool, set during app startup
+_pool: asyncpg.Pool | None = None
 
 
-async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+async def init_db(pool: asyncpg.Pool):
+    global _pool
+    _pool = pool
+    async with pool.acquire() as conn:
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS calls (
-                call_sid TEXT PRIMARY KEY,
-                from_number TEXT NOT NULL,
-                to_number TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'active',
-                started_at TEXT NOT NULL,
-                ended_at TEXT,
-                transcript TEXT DEFAULT '[]',
+                call_sid VARCHAR(64) PRIMARY KEY,
+                from_number VARCHAR(20) NOT NULL,
+                to_number VARCHAR(20) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'active',
+                started_at TIMESTAMPTZ NOT NULL,
+                ended_at TIMESTAMPTZ,
+                transcript JSONB DEFAULT '[]'::jsonb,
                 voicemail_url TEXT,
-                transferred_to TEXT
+                transferred_to VARCHAR(20)
             )
         """)
-        await db.commit()
 
 
 async def save_call(record: CallRecord):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            """INSERT OR REPLACE INTO calls
-               (call_sid, from_number, to_number, status, started_at, ended_at,
-                transcript, voicemail_url, transferred_to)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            record.to_db_row(),
-        )
-        await db.commit()
+    row = record.to_db_row()
+    await _pool.execute(
+        """INSERT INTO calls
+           (call_sid, from_number, to_number, status, started_at, ended_at,
+            transcript, voicemail_url, transferred_to)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (call_sid) DO UPDATE SET
+            from_number = EXCLUDED.from_number,
+            to_number = EXCLUDED.to_number,
+            status = EXCLUDED.status,
+            started_at = EXCLUDED.started_at,
+            ended_at = EXCLUDED.ended_at,
+            transcript = EXCLUDED.transcript,
+            voicemail_url = EXCLUDED.voicemail_url,
+            transferred_to = EXCLUDED.transferred_to""",
+        *row,
+    )
 
 
 async def get_call(call_sid: str) -> CallRecord | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM calls WHERE call_sid = ?", (call_sid,))
-        row = await cursor.fetchone()
-        if not row:
-            return None
-        return _row_to_record(row)
+    row = await _pool.fetchrow("SELECT * FROM calls WHERE call_sid = $1", call_sid)
+    if not row:
+        return None
+    return _row_to_record(row)
 
 
 async def get_calls(
@@ -52,82 +58,85 @@ async def get_calls(
     status: str | None = None,
     search: str | None = None,
 ) -> list[CallRecord]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        query = "SELECT * FROM calls"
-        params: list = []
-        conditions = []
+    query = "SELECT * FROM calls"
+    params: list = []
+    conditions = []
+    idx = 1
 
-        if status:
-            conditions.append("status = ?")
-            params.append(status)
-        if search:
-            conditions.append("from_number LIKE ?")
-            params.append(f"%{search}%")
+    if status:
+        conditions.append(f"status = ${idx}")
+        params.append(status)
+        idx += 1
+    if search:
+        conditions.append(f"from_number LIKE ${idx}")
+        params.append(f"%{search}%")
+        idx += 1
 
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
 
-        query += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+    query += f" ORDER BY started_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
+    params.extend([limit, offset])
 
-        cursor = await db.execute(query, params)
-        rows = await cursor.fetchall()
-        return [_row_to_record(row) for row in rows]
+    rows = await _pool.fetch(query, *params)
+    return [_row_to_record(row) for row in rows]
 
 
 async def get_active_calls() -> list[CallRecord]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM calls WHERE status = ?", (CallStatus.ACTIVE.value,)
-        )
-        rows = await cursor.fetchall()
-        return [_row_to_record(row) for row in rows]
+    rows = await _pool.fetch(
+        "SELECT * FROM calls WHERE status = $1", CallStatus.ACTIVE.value
+    )
+    return [_row_to_record(row) for row in rows]
 
 
 async def update_call_status(call_sid: str, status: CallStatus, ended_at: str | None = None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        if ended_at:
-            await db.execute(
-                "UPDATE calls SET status = ?, ended_at = ? WHERE call_sid = ?",
-                (status.value, ended_at, call_sid),
-            )
-        else:
-            await db.execute(
-                "UPDATE calls SET status = ? WHERE call_sid = ?",
-                (status.value, call_sid),
-            )
-        await db.commit()
+    if ended_at:
+        await _pool.execute(
+            "UPDATE calls SET status = $1, ended_at = $2 WHERE call_sid = $3",
+            status.value, ended_at, call_sid,
+        )
+    else:
+        await _pool.execute(
+            "UPDATE calls SET status = $1 WHERE call_sid = $2",
+            status.value, call_sid,
+        )
 
 
 async def update_call_transcript(call_sid: str, transcript: list[dict]):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE calls SET transcript = ? WHERE call_sid = ?",
-            (json.dumps(transcript), call_sid),
-        )
-        await db.commit()
+    await _pool.execute(
+        "UPDATE calls SET transcript = $1 WHERE call_sid = $2",
+        json.dumps(transcript), call_sid,
+    )
 
 
 async def update_call_voicemail(call_sid: str, voicemail_url: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE calls SET voicemail_url = ?, status = ? WHERE call_sid = ?",
-            (voicemail_url, CallStatus.VOICEMAIL.value, call_sid),
-        )
-        await db.commit()
+    await _pool.execute(
+        "UPDATE calls SET voicemail_url = $1, status = $2 WHERE call_sid = $3",
+        voicemail_url, CallStatus.VOICEMAIL.value, call_sid,
+    )
 
 
 def _row_to_record(row) -> CallRecord:
+    transcript = row["transcript"]
+    if isinstance(transcript, str):
+        transcript = json.loads(transcript)
+
+    started_at = row["started_at"]
+    if hasattr(started_at, "isoformat"):
+        started_at = started_at.isoformat()
+
+    ended_at = row["ended_at"]
+    if hasattr(ended_at, "isoformat"):
+        ended_at = ended_at.isoformat()
+
     return CallRecord(
         call_sid=row["call_sid"],
         from_number=row["from_number"],
         to_number=row["to_number"],
         status=CallStatus(row["status"]),
-        started_at=row["started_at"],
-        ended_at=row["ended_at"],
-        transcript=json.loads(row["transcript"]) if row["transcript"] else [],
+        started_at=started_at,
+        ended_at=ended_at,
+        transcript=transcript,
         voicemail_url=row["voicemail_url"],
         transferred_to=row["transferred_to"],
     )

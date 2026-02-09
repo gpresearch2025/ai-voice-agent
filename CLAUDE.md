@@ -12,7 +12,7 @@ AI-powered phone agent prototype. Handles incoming calls via Twilio, uses Groq (
 - **Python 3.13** / **FastAPI** / **uvicorn**
 - **Groq** (Llama 3.3 70B) — AI brain (free tier)
 - **Twilio** — telephony (trial account, number: +18555380806)
-- **aiosqlite** — call logging
+- **asyncpg** — call logging (Neon PostgreSQL)
 - **pydantic-settings** — config from `.env`
 
 ## Project Structure
@@ -21,7 +21,7 @@ ai-voice-agent/
 ├── main.py              # FastAPI entry point, lifespan, routers, static mount
 ├── config.py            # Pydantic settings from .env
 ├── models.py            # CallRecord, CallStatus, ConfigUpdate
-├── database.py          # Async SQLite CRUD (aiosqlite) with search/filter
+├── database.py          # Async PostgreSQL CRUD (asyncpg/Neon) with search/filter
 ├── routes/
 │   ├── voice.py         # 4 Twilio webhook endpoints
 │   └── api.py           # 6 REST API endpoints (health cached, auth on config)
@@ -35,8 +35,7 @@ ai-voice-agent/
 │   └── app.js           # Fetch API data, render UI, auto-refresh
 ├── render.yaml          # Render deployment blueprint
 ├── requirements.txt
-├── .env                 # API keys (DO NOT commit)
-└── calls.db             # SQLite database (auto-created)
+└── .env                 # API keys + DATABASE_URL (DO NOT commit)
 ```
 
 ## Running Locally
@@ -53,6 +52,7 @@ For local testing with Twilio: `ngrok http 8001`
 - `BUSINESS_HOURS_START/END` — 24h format (e.g. 09:00, 17:00)
 - `BUSINESS_TIMEZONE` — e.g. America/Chicago
 - `DASHBOARD_TOKEN` — protects `PUT /api/config` (leave empty for open access)
+- `DATABASE_URL` — Neon PostgreSQL connection string (`postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require`)
 - `PORT` — default 8001 (8000 conflicts with Laragon)
 
 ## API Endpoints
@@ -95,7 +95,7 @@ Two-layer detection in `services/agent.py`:
 - **Delete `__pycache__` folders** if code changes aren't reflected after restart
 - Sales phone number must include country code: `+18326963009` not `+8326963009`
 - **Render free tier** has cold starts (~30s) if the service hasn't been called recently
-- **SQLite on Render** is ephemeral — call logs reset on redeploy. Consider upgrading to PostgreSQL for persistence.
+- **Database** is Neon PostgreSQL (free tier) — call logs persist across Render deploys
 
 ## Twilio Webhook Config (Production)
 - A call comes in: `https://ai-voice-agent-a4bq.onrender.com/voice/incoming` (POST)
@@ -106,6 +106,6 @@ Two-layer detection in `services/agent.py`:
 - [x] ~~Build web dashboard~~ — done (plain HTML/CSS/JS served from FastAPI)
 - [ ] Set up TwiML Bin fallback for server-down scenario
 - [ ] Test after-hours voicemail flow
-- [ ] Upgrade to persistent database (PostgreSQL) for Render
+- [x] ~~Upgrade to persistent database (PostgreSQL) for Render~~ — done (Neon free tier, asyncpg)
 - [ ] Add more natural TTS voice (ElevenLabs or Deepgram)
 - [ ] Add dashboard auth for read endpoints (currently only config PUT is protected)
