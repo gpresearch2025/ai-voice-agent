@@ -5,7 +5,7 @@ from groq import AsyncGroq
 
 from config import settings
 from models import ConfigUpdate
-from database import get_calls, get_call, get_active_calls
+from database import get_calls, get_call, get_active_calls, count_calls, get_call_stats
 from services.call_manager import call_manager
 
 logger = logging.getLogger(__name__)
@@ -70,11 +70,13 @@ async def list_calls(
 ):
     """Paginated list of call records with optional filters."""
     calls = await get_calls(limit=limit, offset=offset, status=status, search=search)
+    total = await count_calls(status=status, search=search)
     return {
         "calls": [call.model_dump() for call in calls],
         "limit": limit,
         "offset": offset,
         "count": len(calls),
+        "total": total,
     }
 
 
@@ -86,6 +88,12 @@ async def list_active_calls():
         "active_calls": [call.model_dump() for call in calls],
         "count": len(calls),
     }
+
+
+@router.get("/calls/stats")
+async def call_stats():
+    """Summary statistics for the dashboard."""
+    return await get_call_stats()
 
 
 @router.get("/calls/{call_sid}")

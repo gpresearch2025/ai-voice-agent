@@ -24,15 +24,15 @@ ai-voice-agent/
 ├── database.py          # Async PostgreSQL CRUD (asyncpg/Neon), stale call cleanup
 ├── routes/
 │   ├── voice.py         # 5 Twilio webhook endpoints (incoming, respond, transfer, voicemail, status)
-│   └── api.py           # 6 REST API endpoints (health cached, auth on config)
+│   └── api.py           # 7 REST API endpoints (health cached, stats, auth on config)
 ├── services/
 │   ├── agent.py         # Groq AI + sales/support transfer detection
 │   ├── call_manager.py  # In-memory conversation state
 │   └── hours.py         # Business hours checking (timezone-aware)
 ├── static/
 │   ├── index.html       # Dashboard page (single-page, no framework)
-│   ├── style.css        # Dark theme styles
-│   └── app.js           # Fetch API data, render UI, auto-refresh
+│   ├── style.css        # CSS custom properties for light/dark themes
+│   └── app.js           # Dashboard logic: stats, theme toggle, CSV export, auto-refresh
 ├── render.yaml          # Render deployment blueprint
 ├── requirements.txt
 └── .env                 # API keys + DATABASE_URL (DO NOT commit)
@@ -58,8 +58,9 @@ For local testing with Twilio: `ngrok http 8001`
 
 ## API Endpoints
 - `GET /api/health` — system health + Groq connectivity (cached 60s)
-- `GET /api/calls?limit=&offset=&status=&search=` — paginated call logs with filtering
+- `GET /api/calls?limit=&offset=&status=&search=` — paginated call logs with filtering (returns `total` count)
 - `GET /api/calls/active` — currently active calls
+- `GET /api/calls/stats` — summary stats (today, total, transferred, voicemail, avg duration)
 - `GET /api/calls/{call_sid}` — single call detail with transcript
 - `GET /api/config` — current configuration (includes `auth_required` flag)
 - `PUT /api/config` — update business hours, transfer numbers (requires `DASHBOARD_TOKEN` if set)
@@ -67,15 +68,26 @@ For local testing with Twilio: `ngrok http 8001`
 
 ## Web Dashboard
 - **URL:** `/` redirects to `/dashboard/` (served as static files from `static/`)
-- **Sections:** system status, config editor, call log table, transcript viewer modal
+- **Sections:** stats row, system status, config editor, call log table, transcript viewer modal
 - **Features:**
-  - Auto-refresh: health every 10s, calls every 15s
+  - Light/dark theme toggle (persisted in localStorage, inline script prevents flash)
+  - Summary stats row: Today, All Time, Transferred, Voicemail, Avg Duration
+  - Auto-refresh: health every 10s, calls + stats every 15s
   - Search by phone number, filter by call status
+  - "Transferred To" column in call log (maps numbers to agent names: Braydon/Phong)
   - Live elapsed timer for active calls (pulsing blue dot)
+  - Transcript modal with: meta info bar, voicemail audio playback, chat bubbles
+  - CSV export button (exports current page of calls)
+  - Pagination with "Page X of Y" total count
+  - Empty state with icon when no calls match
+  - Mobile responsive: card-style table layout with `data-label` attributes
+  - Config form in 2-column grid layout
   - "Last updated" timestamp in header
   - Auth modal prompts for token on config save (if `DASHBOARD_TOKEN` is set)
+  - Branded SVG favicon (teal rounded rect with microphone)
   - All user data escaped to prevent XSS
-- **Tech:** Plain HTML/CSS/JS, no framework, dark theme (#1a1a2e background, #0f9d8c teal accent)
+- **Tech:** Plain HTML/CSS/JS, no framework, CSS custom properties for theming
+- **Theme colors:** Dark (#1a1a2e bg), Light (#f0f2f5 bg), Accent (#0f9d8c teal)
 
 ## Call Flow
 1. **Normal call:** Twilio → `/voice/incoming` → check hours → greeting → `/voice/respond` loop (Groq generates replies)
@@ -128,6 +140,7 @@ Two-layer detection in `services/agent.py`:
 - [x] ~~Upgrade to persistent database (PostgreSQL) for Render~~ — done (Neon free tier, asyncpg)
 - [x] ~~Add sales + support transfer with DTMF menu~~ — done (Braydon/Phong)
 - [x] ~~Fix stale "active" calls~~ — done (background cleanup every 2min + asyncpg datetime fix)
+- [x] ~~Dashboard overhaul~~ — done (light/dark theme, stats row, transferred column, CSV export, voicemail playback, responsive mobile, empty states, pagination totals, branded favicon)
 - [ ] Set up TwiML Bin fallback for server-down scenario
 - [ ] Test after-hours voicemail flow
 - [ ] Add more natural TTS voice (ElevenLabs or Deepgram)

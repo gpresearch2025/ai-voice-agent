@@ -4,8 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Voice Agent Dashboard</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📞</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f9d8c'/%3E%3Cpath d='M16 6a7 7 0 0 1 7 7v3a7 7 0 0 1-14 0v-3a7 7 0 0 1 7-7zm-2 18h4v2h-4z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Prevent flash of wrong theme
+    (function() {
+      const theme = localStorage.getItem("dashboard_theme");
+      if (theme) document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
 </head>
 <body>
 
@@ -19,10 +26,37 @@
       <span class="health-indicator" id="healthDot" title="System health"></span>
       <span id="healthLabel">Checking...</span>
       <span class="badge" id="activeCallsBadge" title="Active calls">0 active</span>
+      <button class="theme-toggle" id="themeToggle" title="Toggle light/dark mode">
+        <span id="themeIcon">&#9788;</span>
+      </button>
     </div>
   </header>
 
   <main class="container">
+
+    <!-- Stats Row -->
+    <div class="stats-row" id="statsRow">
+      <div class="stat-card accent">
+        <div class="stat-value" id="statToday">--</div>
+        <div class="stat-label">Today</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statTotal">--</div>
+        <div class="stat-label">All Time</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statTransferred">--</div>
+        <div class="stat-label">Transferred</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statVoicemail">--</div>
+        <div class="stat-label">Voicemail</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statAvgDuration">--</div>
+        <div class="stat-label">Avg Duration</div>
+      </div>
+    </div>
 
     <!-- Top row: Status + Config -->
     <div class="card-row">
@@ -62,25 +96,27 @@
       <section class="card" id="configCard">
         <h2>Configuration</h2>
         <form id="configForm" class="config-form">
-          <div class="form-row">
-            <label for="hoursStart">Business Hours Start</label>
-            <input type="text" id="hoursStart" placeholder="09:00">
-          </div>
-          <div class="form-row">
-            <label for="hoursEnd">Business Hours End</label>
-            <input type="text" id="hoursEnd" placeholder="17:00">
-          </div>
-          <div class="form-row">
-            <label for="timezone">Timezone</label>
-            <input type="text" id="timezone" placeholder="America/Chicago">
-          </div>
-          <div class="form-row">
-            <label for="salesNumber">Sales Transfer Number</label>
-            <input type="text" id="salesNumber" placeholder="+18326963009">
-          </div>
-          <div class="form-row">
-            <label for="supportNumber">Support Transfer Number</label>
-            <input type="text" id="supportNumber" placeholder="+18001234567">
+          <div class="config-columns">
+            <div class="form-row">
+              <label for="hoursStart">Hours Start</label>
+              <input type="text" id="hoursStart" placeholder="09:00">
+            </div>
+            <div class="form-row">
+              <label for="hoursEnd">Hours End</label>
+              <input type="text" id="hoursEnd" placeholder="17:00">
+            </div>
+            <div class="form-row">
+              <label for="timezone">Timezone</label>
+              <input type="text" id="timezone" placeholder="America/Chicago">
+            </div>
+            <div class="form-row">
+              <label for="salesNumber">Sales (Braydon)</label>
+              <input type="text" id="salesNumber" placeholder="+18326963009">
+            </div>
+            <div class="form-row">
+              <label for="supportNumber">Support (Phong)</label>
+              <input type="text" id="supportNumber" placeholder="+18326412959">
+            </div>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary">Save Changes</button>
@@ -104,6 +140,7 @@
             <option value="transferred">Transferred</option>
             <option value="voicemail">Voicemail</option>
           </select>
+          <button class="btn btn-sm" id="exportCsv" title="Export as CSV">Export CSV</button>
           <div class="pagination">
             <button class="btn btn-sm" id="prevPage" disabled>&larr; Prev</button>
             <span id="pageInfo">Page 1</span>
@@ -119,12 +156,13 @@
               <th>Time</th>
               <th>From</th>
               <th>Status</th>
+              <th>Transferred To</th>
               <th>Duration</th>
               <th>Details</th>
             </tr>
           </thead>
           <tbody id="callTableBody">
-            <tr><td colspan="5" class="empty-msg"><span class="spinner"></span> Loading calls...</td></tr>
+            <tr><td colspan="6" class="empty-msg"><span class="spinner"></span> Loading calls...</td></tr>
           </tbody>
         </table>
       </div>

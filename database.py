@@ -96,6 +96,52 @@ async def get_calls(
     return [_row_to_record(row) for row in rows]
 
 
+async def count_calls(
+    status: str | None = None,
+    search: str | None = None,
+) -> int:
+    query = "SELECT COUNT(*) FROM calls"
+    params: list = []
+    conditions = []
+    idx = 1
+
+    if status:
+        conditions.append(f"status = ${idx}")
+        params.append(status)
+        idx += 1
+    if search:
+        conditions.append(f"from_number LIKE ${idx}")
+        params.append(f"%{search}%")
+        idx += 1
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    return await _pool.fetchval(query, *params)
+
+
+async def get_call_stats() -> dict:
+    """Get summary stats for the dashboard."""
+    rows = await _pool.fetch("""
+        SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE started_at::date = CURRENT_DATE) AS today,
+            COUNT(*) FILTER (WHERE status = 'transferred') AS transferred,
+            COUNT(*) FILTER (WHERE status = 'voicemail') AS voicemail,
+            AVG(EXTRACT(EPOCH FROM (ended_at - started_at)))
+                FILTER (WHERE ended_at IS NOT NULL AND started_at IS NOT NULL) AS avg_duration
+        FROM calls
+    """)
+    row = rows[0]
+    return {
+        "total_calls": row["total"],
+        "today_calls": row["today"],
+        "transferred": row["transferred"],
+        "voicemail": row["voicemail"],
+        "avg_duration_seconds": round(row["avg_duration"] or 0),
+    }
+
+
 async def get_active_calls() -> list[CallRecord]:
     rows = await _pool.fetch(
         "SELECT * FROM calls WHERE status = $1", CallStatus.ACTIVE.value

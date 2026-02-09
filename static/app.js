@@ -43,14 +43,57 @@ const authClose = $("#authClose");
 const authForm = $("#authForm");
 const authToken = $("#authToken");
 const authMsg = $("#authMsg");
+const themeToggle = $("#themeToggle");
+const themeIcon = $("#themeIcon");
+const exportCsvBtn = $("#exportCsv");
+
+// Stats elements
+const statToday = $("#statToday");
+const statTotal = $("#statTotal");
+const statTransferred = $("#statTransferred");
+const statVoicemail = $("#statVoicemail");
+const statAvgDuration = $("#statAvgDuration");
 
 // === State ===
 let currentPage = 0;
 const PAGE_SIZE = 20;
-let originalConfig = {};     // Track original config to detect real changes
-let authRequired = false;    // Whether server requires a token
-let pendingConfigSave = null; // Config body waiting for auth
-let activeCallTimers = [];   // Intervals for live duration counters
+let originalConfig = {};
+let authRequired = false;
+let pendingConfigSave = null;
+let activeCallTimers = [];
+let lastCallData = [];  // Cache for CSV export
+
+// === Known agent mapping ===
+const AGENT_MAP = {
+  "+18326963009": "Braydon (Sales)",
+  "+18326412959": "Phong (Support)",
+};
+
+function formatTransferredTo(num) {
+  if (!num) return "--";
+  if (AGENT_MAP[num]) return AGENT_MAP[num];
+  return formatPhone(num);
+}
+
+// === Theme Toggle ===
+function getTheme() {
+  return document.documentElement.getAttribute("data-theme") || "dark";
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("dashboard_theme", theme);
+  themeIcon.innerHTML = theme === "light" ? "&#9790;" : "&#9788;"; // ☾ or ☼
+}
+
+function initTheme() {
+  const current = getTheme();
+  themeIcon.innerHTML = current === "light" ? "&#9790;" : "&#9788;";
+}
+
+themeToggle.addEventListener("click", () => {
+  setTheme(getTheme() === "light" ? "dark" : "light");
+});
 
 // === Auth ===
 function getToken() {
@@ -86,7 +129,6 @@ authForm.addEventListener("submit", async (e) => {
 
   setToken(token);
 
-  // Retry the pending config save
   if (pendingConfigSave) {
     hideAuthModal();
     await saveConfig(pendingConfigSave);
@@ -112,7 +154,6 @@ async function fetchHealth() {
     healthDot.className = "health-indicator " + data.status;
     healthLabel.textContent = data.status === "healthy" ? "Healthy" : "Degraded";
 
-    // Badge: teal when active calls > 0, gray when 0
     activeCallsBadge.textContent = data.active_calls + " active";
     activeCallsBadge.className = "badge " + (data.active_calls > 0 ? "active" : "inactive");
 
@@ -141,6 +182,30 @@ async function fetchHealth() {
   }
 }
 
+// === Stats ===
+async function fetchStats() {
+  try {
+    const res = await fetch(`${API}/calls/stats`);
+    const data = await res.json();
+
+    statToday.textContent = data.today_calls;
+    statTotal.textContent = data.total_calls;
+    statTransferred.textContent = data.transferred;
+    statVoicemail.textContent = data.voicemail;
+
+    const secs = data.avg_duration_seconds || 0;
+    if (secs > 0) {
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      statAvgDuration.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
+    } else {
+      statAvgDuration.textContent = "--";
+    }
+  } catch {
+    // Leave stats as "--"
+  }
+}
+
 // === Config ===
 async function fetchConfig() {
   try {
@@ -163,12 +228,10 @@ async function fetchConfig() {
     $("#salesNumber").value = originalConfig.sales_phone_number;
     $("#supportNumber").value = originalConfig.support_phone_number;
 
-    // Populate status card extras
     phoneNumber.textContent = data.twilio_phone_number
       ? formatPhone(data.twilio_phone_number)
       : "Not set";
 
-    // Check if currently within business hours
     updateHoursStatus(data.business_hours_start, data.business_hours_end, data.business_timezone);
   } catch {
     console.error("Failed to load config");
@@ -198,7 +261,6 @@ async function saveConfig(body) {
     if (res.ok) {
       configMsg.textContent = "Saved!";
       configMsg.className = "config-msg success";
-      // Update original config so same values aren't re-sent
       Object.assign(originalConfig, body);
     } else {
       const err = await res.json();
@@ -216,7 +278,6 @@ async function saveConfig(body) {
 configForm.addEventListener("submit", async (e) => {
   e.preventDefault();
 
-  // Only send fields that actually changed from original
   const body = {};
   const fields = {
     business_hours_start: $("#hoursStart").value.trim(),
@@ -246,7 +307,6 @@ configForm.addEventListener("submit", async (e) => {
 function updateHoursStatus(startStr, endStr, tz) {
   try {
     const now = new Date();
-    // Get current time in the business timezone
     const timeInTz = now.toLocaleTimeString("en-US", {
       timeZone: tz, hour12: false, hour: "2-digit", minute: "2-digit",
     });
@@ -261,7 +321,7 @@ function updateHoursStatus(startStr, endStr, tz) {
   }
 }
 
-// === Call Log ===
+// === Call Log Formatting ===
 function formatTime(isoStr) {
   if (!isoStr) return "--";
   try {
@@ -280,7 +340,7 @@ function formatDuration(startStr, endStr) {
   if (!startStr || !endStr) return null;
   try {
     const ms = new Date(endStr) - new Date(startStr);
-    if (ms <= 0 || isNaN(ms)) return null; // 0s = bogus data, show "--"
+    if (ms <= 0 || isNaN(ms)) return null;
     return formatMs(ms);
   } catch {
     return null;
@@ -328,6 +388,7 @@ function clearActiveTimers() {
   activeCallTimers = [];
 }
 
+// === Call Log ===
 async function fetchCalls() {
   try {
     const offset = currentPage * PAGE_SIZE;
@@ -342,16 +403,26 @@ async function fetchCalls() {
     const data = await res.json();
 
     clearActiveTimers();
+    lastCallData = data.calls; // Cache for CSV
+
+    const total = data.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
     // Total count display
-    callCount.textContent = data.count > 0 ? `(${data.count}${data.count >= PAGE_SIZE ? "+" : ""})` : "";
+    callCount.textContent = total > 0 ? `(${total})` : "";
 
     if (data.calls.length === 0) {
-      const msg = (search || status) ? "No calls match filters" : "No calls yet";
-      callTableBody.innerHTML = `<tr><td colspan="5" class="empty-msg">${escapeHtml(msg)}</td></tr>`;
+      const hasFilters = search || status;
+      callTableBody.innerHTML = `<tr><td colspan="6">
+        <div class="empty-state">
+          <div class="empty-icon">${hasFilters ? "\u{1F50D}" : "\u{1F4DE}"}</div>
+          <div class="empty-text">${hasFilters ? "No calls match your filters" : "No calls yet"}</div>
+          <div class="empty-sub">${hasFilters ? "Try adjusting your search or filter" : "Calls will appear here when received"}</div>
+        </div>
+      </td></tr>`;
       prevPage.disabled = true;
-      nextPage.disabled = data.count < PAGE_SIZE;
-      pageInfo.textContent = `Page ${currentPage + 1}`;
+      nextPage.disabled = true;
+      pageInfo.textContent = `Page 1 of 1`;
       return;
     }
 
@@ -361,7 +432,7 @@ async function fetchCalls() {
     data.calls.forEach((call, i) => {
       const dateStr = formatDateOnly(call.started_at);
       if (dateStr && dateStr !== lastDate) {
-        rows.push(`<tr class="date-separator"><td colspan="5">${escapeHtml(dateStr)}</td></tr>`);
+        rows.push(`<tr class="date-separator"><td colspan="6">${escapeHtml(dateStr)}</td></tr>`);
         lastDate = dateStr;
       }
 
@@ -371,12 +442,15 @@ async function fetchCalls() {
         ? `<span class="duration-live" id="dur-${i}">0s</span>`
         : escapeHtml(dur || "--");
 
+      const transferredTo = formatTransferredTo(call.transferred_to);
+
       rows.push(`<tr>
-        <td>${escapeHtml(formatTimeOnly(call.started_at))}</td>
-        <td>${escapeHtml(formatPhone(call.from_number))}</td>
-        <td><span class="status-badge ${escapeAttr(call.status)}">${escapeHtml(call.status)}</span></td>
-        <td>${durCell}</td>
-        <td><button class="btn-detail" data-sid="${escapeAttr(call.call_sid)}">View</button></td>
+        <td data-label="Time">${escapeHtml(formatTimeOnly(call.started_at))}</td>
+        <td data-label="From">${escapeHtml(formatPhone(call.from_number))}</td>
+        <td data-label="Status"><span class="status-badge ${escapeAttr(call.status)}">${escapeHtml(call.status)}</span></td>
+        <td data-label="Transferred To"><span class="transferred-label">${escapeHtml(transferredTo)}</span></td>
+        <td data-label="Duration">${durCell}</td>
+        <td data-label="Details"><button class="btn-detail" data-sid="${escapeAttr(call.call_sid)}">View</button></td>
       </tr>`);
     });
     callTableBody.innerHTML = rows.join("");
@@ -401,12 +475,12 @@ async function fetchCalls() {
     };
 
     prevPage.disabled = currentPage === 0;
-    nextPage.disabled = data.count < PAGE_SIZE;
-    pageInfo.textContent = `Page ${currentPage + 1}`;
+    nextPage.disabled = (currentPage + 1) >= totalPages;
+    pageInfo.textContent = `Page ${currentPage + 1} of ${totalPages}`;
 
     updateTimestamp();
   } catch {
-    callTableBody.innerHTML = '<tr><td colspan="5" class="empty-msg">Failed to load calls</td></tr>';
+    callTableBody.innerHTML = '<tr><td colspan="6" class="empty-msg">Failed to load calls</td></tr>';
   }
 }
 
@@ -434,6 +508,33 @@ nextPage.addEventListener("click", () => {
   fetchCalls();
 });
 
+// === CSV Export ===
+exportCsvBtn.addEventListener("click", () => {
+  if (!lastCallData || lastCallData.length === 0) return;
+
+  const headers = ["Time", "From", "Status", "Transferred To", "Duration", "Call SID"];
+  const csvRows = [headers.join(",")];
+
+  lastCallData.forEach((call) => {
+    const time = call.started_at ? new Date(call.started_at).toLocaleString() : "";
+    const from = call.from_number || "";
+    const status = call.status || "";
+    const transferred = call.transferred_to ? (AGENT_MAP[call.transferred_to] || call.transferred_to) : "";
+    const dur = formatDuration(call.started_at, call.ended_at) || "";
+    const sid = call.call_sid || "";
+
+    csvRows.push([time, from, status, transferred, dur, sid].map((v) => `"${v.replace(/"/g, '""')}"`).join(","));
+  });
+
+  const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `calls_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
 // === Transcript Modal ===
 async function showTranscript(callSid) {
   modalBackdrop.classList.add("open");
@@ -444,24 +545,51 @@ async function showTranscript(callSid) {
     const res = await fetch(`${API}/calls/${encodeURIComponent(callSid)}`);
     const call = await res.json();
 
-    modalTitle.textContent = `Call from ${escapeHtml(formatPhone(call.from_number))} \u2014 ${escapeHtml(formatTime(call.started_at))}`;
+    modalTitle.textContent = `Call from ${escapeHtml(formatPhone(call.from_number))}`;
 
-    const transcript = call.transcript || [];
+    // Build meta info bar
+    const metaParts = [];
+    metaParts.push(`<span class="meta-item">Time: <span class="meta-value">${escapeHtml(formatTime(call.started_at))}</span></span>`);
+    metaParts.push(`<span class="meta-item">Status: <span class="meta-value">${escapeHtml(call.status)}</span></span>`);
 
-    if (transcript.length === 0) {
-      modalBody.innerHTML = '<p class="no-transcript">No transcript recorded for this call</p>';
-      return;
+    const dur = formatDuration(call.started_at, call.ended_at);
+    if (dur) {
+      metaParts.push(`<span class="meta-item">Duration: <span class="meta-value">${escapeHtml(dur)}</span></span>`);
     }
 
-    modalBody.innerHTML = transcript.map((turn) => {
-      const roleClass = turn.role === "caller" ? "caller" : "assistant";
-      const label = turn.role === "caller" ? "Caller" : "AI Assistant";
-      return `<div class="chat-bubble ${roleClass}">
-        <div class="chat-label">${escapeHtml(label)}</div>
-        <div>${escapeHtml(turn.content)}</div>
-        ${turn.timestamp ? `<div class="bubble-time">${escapeHtml(formatTime(turn.timestamp))}</div>` : ""}
+    if (call.transferred_to) {
+      const agentName = formatTransferredTo(call.transferred_to);
+      metaParts.push(`<span class="meta-item">Transferred to: <span class="meta-value">${escapeHtml(agentName)}</span></span>`);
+    }
+
+    let html = `<div class="modal-meta">${metaParts.join("")}</div>`;
+
+    // Voicemail player
+    if (call.voicemail_url) {
+      html += `<div class="voicemail-player">
+        <div class="voicemail-label">Voicemail Recording</div>
+        <audio controls preload="none" src="${escapeAttr(call.voicemail_url)}"></audio>
       </div>`;
-    }).join("");
+    }
+
+    // Transcript bubbles
+    const transcript = call.transcript || [];
+
+    if (transcript.length === 0 && !call.voicemail_url) {
+      html += '<p class="no-transcript">No transcript recorded for this call</p>';
+    } else if (transcript.length > 0) {
+      html += transcript.map((turn) => {
+        const roleClass = turn.role === "caller" ? "caller" : "assistant";
+        const label = turn.role === "caller" ? "Caller" : "AI Assistant";
+        return `<div class="chat-bubble ${roleClass}">
+          <div class="chat-label">${escapeHtml(label)}</div>
+          <div>${escapeHtml(turn.content)}</div>
+          ${turn.timestamp ? `<div class="bubble-time">${escapeHtml(formatTime(turn.timestamp))}</div>` : ""}
+        </div>`;
+      }).join("");
+    }
+
+    modalBody.innerHTML = html;
   } catch {
     modalBody.innerHTML = '<p class="no-transcript">Failed to load transcript</p>';
   }
@@ -484,12 +612,15 @@ document.addEventListener("keydown", (e) => {
 
 // === Init & Auto-refresh ===
 function init() {
+  initTheme();
   fetchHealth();
   fetchConfig();
+  fetchStats();
   fetchCalls();
 
   setInterval(fetchHealth, 10000);
   setInterval(fetchCalls, 15000);
+  setInterval(fetchStats, 15000);
 }
 
 init();
