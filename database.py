@@ -1,6 +1,16 @@
 import json
+from datetime import datetime, timezone
 import asyncpg
 from models import CallRecord, CallStatus
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    """Convert ISO string to datetime for asyncpg TIMESTAMPTZ columns."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(value)
 
 # Module-level pool, set during app startup
 _pool: asyncpg.Pool | None = None
@@ -27,6 +37,10 @@ async def init_db(pool: asyncpg.Pool):
 
 async def save_call(record: CallRecord):
     row = record.to_db_row()
+    # Convert ISO strings to datetime objects for TIMESTAMPTZ columns
+    row_list = list(row)
+    row_list[4] = _parse_dt(row_list[4])  # started_at
+    row_list[5] = _parse_dt(row_list[5])  # ended_at
     await _pool.execute(
         """INSERT INTO calls
            (call_sid, from_number, to_number, status, started_at, ended_at,
@@ -41,7 +55,7 @@ async def save_call(record: CallRecord):
             transcript = EXCLUDED.transcript,
             voicemail_url = EXCLUDED.voicemail_url,
             transferred_to = EXCLUDED.transferred_to""",
-        *row,
+        *row_list,
     )
 
 
@@ -93,7 +107,7 @@ async def update_call_status(call_sid: str, status: CallStatus, ended_at: str | 
     if ended_at:
         await _pool.execute(
             "UPDATE calls SET status = $1, ended_at = $2 WHERE call_sid = $3",
-            status.value, ended_at, call_sid,
+            status.value, _parse_dt(ended_at), call_sid,
         )
     else:
         await _pool.execute(
