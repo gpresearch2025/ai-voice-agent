@@ -130,6 +130,19 @@ async def update_call_transferred_to(call_sid: str, transferred_to: str):
     )
 
 
+async def close_stale_calls(max_age_minutes: int = 15) -> int:
+    """Auto-close calls stuck as 'active' longer than max_age_minutes.
+    Returns the number of calls closed."""
+    cutoff = datetime.now(timezone.utc) - __import__("datetime").timedelta(minutes=max_age_minutes)
+    result = await _pool.execute(
+        "UPDATE calls SET status = $1, ended_at = $2 WHERE status = $3 AND started_at < $4",
+        CallStatus.COMPLETED.value, datetime.now(timezone.utc), CallStatus.ACTIVE.value, cutoff,
+    )
+    # result looks like "UPDATE 3"
+    count = int(result.split()[-1])
+    return count
+
+
 async def update_call_voicemail(call_sid: str, voicemail_url: str):
     await _pool.execute(
         "UPDATE calls SET voicemail_url = $1, status = $2 WHERE call_sid = $3",

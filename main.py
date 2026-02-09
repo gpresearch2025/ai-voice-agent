@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 import asyncpg
@@ -7,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 
 from config import settings
-from database import init_db
+from database import init_db, close_stale_calls
 from routes.voice import router as voice_router
 from routes.api import router as api_router
 
@@ -29,7 +30,23 @@ async def lifespan(app: FastAPI):
     logger.info(f"Business hours: {settings.business_hours_start}-{settings.business_hours_end} ({settings.business_timezone})")
     logger.info(f"Sales transfer: {settings.sales_phone_number}")
     logger.info(f"Support transfer: {settings.support_phone_number or '(not set)'}")
+
+    # Background task: close stale "active" calls every 2 minutes
+    async def _cleanup_loop():
+        while True:
+            await asyncio.sleep(120)
+            try:
+                closed = await close_stale_calls(max_age_minutes=15)
+                if closed:
+                    logger.info(f"Stale call cleanup: closed {closed} call(s)")
+            except Exception as e:
+                logger.error(f"Stale call cleanup error: {e}")
+
+    cleanup_task = asyncio.create_task(_cleanup_loop())
+
     yield
+
+    cleanup_task.cancel()
     await pool.close()
     logger.info("Database pool closed")
 
