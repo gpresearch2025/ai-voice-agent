@@ -105,6 +105,7 @@ async def get_config():
         "business_hours_end": settings.business_hours_end,
         "business_timezone": settings.business_timezone,
         "sales_phone_number": settings.sales_phone_number,
+        "support_phone_number": settings.support_phone_number,
         "twilio_phone_number": settings.twilio_phone_number,
         "groq_key_set": bool(settings.groq_api_key),
         "twilio_configured": bool(settings.twilio_account_sid),
@@ -136,6 +137,10 @@ async def update_config(
     if update.sales_phone_number is not None:
         settings.sales_phone_number = update.sales_phone_number
         updated_fields["sales_phone_number"] = update.sales_phone_number
+
+    if update.support_phone_number is not None:
+        settings.support_phone_number = update.support_phone_number
+        updated_fields["support_phone_number"] = update.support_phone_number
 
     if not updated_fields:
         raise HTTPException(status_code=400, detail="No fields to update")

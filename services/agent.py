@@ -14,29 +14,46 @@ Your job is to help callers with their questions and route them appropriately.
 CRITICAL RULES:
 1. Be concise. Phone conversations should use short, clear sentences.
 2. Be warm and professional. Greet callers politely.
-3. TRANSFER RULE — This is MANDATORY: When the caller mentions ANY of the following topics:
-   pricing, purchasing, buying, cost, sales, demo, trial, contract, quote, order, plans,
-   or asks to speak with a sales representative or human agent,
-   you MUST start your response with the EXACT text [TRANSFER_SALES] followed by a space
-   and then a brief transition message.
+3. TRANSFER RULES — These are MANDATORY:
 
-   Correct example: [TRANSFER_SALES] Great, let me connect you with our sales team right away.
-   Correct example: [TRANSFER_SALES] I'll transfer you to a sales representative who can help with pricing.
+   a) SALES TRANSFER: When the caller mentions ANY of the following topics:
+      pricing, purchasing, buying, cost, sales, demo, trial, contract, quote, order, plans,
+      or asks to speak with a sales representative,
+      you MUST start your response with the EXACT text [TRANSFER_SALES] followed by a space
+      and then a brief transition message.
 
-   You MUST include [TRANSFER_SALES] at the very beginning. Do NOT skip it.
+      Correct example: [TRANSFER_SALES] Great, let me connect you with our sales team right away.
 
-4. For general questions (support, hours, directions, FAQs), answer directly WITHOUT the prefix.
+   b) SUPPORT TRANSFER: When the caller mentions ANY of the following topics:
+      help, technical issue, support, troubleshoot, bug, error, problem, broken, not working,
+      fix, repair, account issue, password reset, login issue,
+      or asks to speak with a support representative or technician,
+      you MUST start your response with the EXACT text [TRANSFER_SUPPORT] followed by a space
+      and then a brief transition message.
+
+      Correct example: [TRANSFER_SUPPORT] Let me connect you with our support team to help with that.
+
+   You MUST include the correct prefix at the very beginning. Do NOT skip it.
+
+4. For general questions (hours, directions, FAQs), answer directly WITHOUT any prefix.
 5. If you don't know the answer, say so honestly and offer to connect them with a human.
 6. Keep responses under 3 sentences when possible — callers are listening, not reading.
 7. Never mention that you are an AI unless directly asked.
 """
 
-TRANSFER_PREFIX = "[TRANSFER_SALES]"
+TRANSFER_SALES_PREFIX = "[TRANSFER_SALES]"
+TRANSFER_SUPPORT_PREFIX = "[TRANSFER_SUPPORT]"
 
-# Fallback keywords for detecting sales intent if the AI forgets the prefix
+# Fallback keywords for detecting transfer intent if the AI forgets the prefix
 SALES_KEYWORDS = re.compile(
-    r"\b(transfer you|connect you with.*(sales|representative|agent)|"
-    r"let me (transfer|connect|put you through))\b",
+    r"\b(transfer you|connect you with.*(sales|representative|agent|pricing)|"
+    r"let me (transfer|connect|put you through).*(sales|pricing))\b",
+    re.IGNORECASE,
+)
+
+SUPPORT_KEYWORDS = re.compile(
+    r"\b(connect you with.*(support|technician|technical|tech team)|"
+    r"let me (transfer|connect|put you through).*(support|technical|tech team))\b",
     re.IGNORECASE,
 )
 
@@ -72,16 +89,29 @@ async def get_ai_response(conversation_messages: list[dict]) -> str:
         )
 
 
-def is_sales_transfer(response: str) -> bool:
-    """Check if response indicates a sales transfer — by prefix or keyword fallback."""
-    if response.startswith(TRANSFER_PREFIX):
-        return True
+def detect_transfer(response: str) -> str | None:
+    """Check if response indicates a transfer request.
+
+    Returns 'sales', 'support', or None.
+    """
+    if response.startswith(TRANSFER_SALES_PREFIX):
+        return "sales"
+    if response.startswith(TRANSFER_SUPPORT_PREFIX):
+        return "support"
     # Fallback: AI forgot the prefix but is clearly trying to transfer
+    if SUPPORT_KEYWORDS.search(response):
+        logger.info("Support transfer detected via keyword fallback")
+        return "support"
     if SALES_KEYWORDS.search(response):
         logger.info("Sales transfer detected via keyword fallback")
-        return True
-    return False
+        return "sales"
+    return None
 
 
 def strip_transfer_prefix(response: str) -> str:
-    return response.removeprefix(TRANSFER_PREFIX).strip()
+    return (
+        response
+        .removeprefix(TRANSFER_SALES_PREFIX)
+        .removeprefix(TRANSFER_SUPPORT_PREFIX)
+        .strip()
+    )

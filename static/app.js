@@ -154,12 +154,14 @@ async function fetchConfig() {
       business_hours_end: data.business_hours_end || "",
       business_timezone: data.business_timezone || "",
       sales_phone_number: data.sales_phone_number || "",
+      support_phone_number: data.support_phone_number || "",
     };
 
     $("#hoursStart").value = originalConfig.business_hours_start;
     $("#hoursEnd").value = originalConfig.business_hours_end;
     $("#timezone").value = originalConfig.business_timezone;
     $("#salesNumber").value = originalConfig.sales_phone_number;
+    $("#supportNumber").value = originalConfig.support_phone_number;
 
     // Populate status card extras
     phoneNumber.textContent = data.twilio_phone_number
@@ -221,6 +223,7 @@ configForm.addEventListener("submit", async (e) => {
     business_hours_end: $("#hoursEnd").value.trim(),
     business_timezone: $("#timezone").value.trim(),
     sales_phone_number: $("#salesNumber").value.trim(),
+    support_phone_number: $("#supportNumber").value.trim(),
   };
 
   for (const [key, val] of Object.entries(fields)) {

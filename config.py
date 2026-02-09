@@ -10,8 +10,9 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
 
-    # Sales transfer
+    # Transfer numbers
     sales_phone_number: str = "+1234567890"
+    support_phone_number: str = ""
 
     # Business hours
     business_hours_start: str = "09:00"

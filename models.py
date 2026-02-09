@@ -47,3 +47,4 @@ class ConfigUpdate(BaseModel):
     business_hours_end: str | None = None
     business_timezone: str | None = None
     sales_phone_number: str | None = None
+    support_phone_number: str | None = None

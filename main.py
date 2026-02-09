@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     logger.info("AI Voice Agent ready")
     logger.info(f"Business hours: {settings.business_hours_start}-{settings.business_hours_end} ({settings.business_timezone})")
     logger.info(f"Sales transfer: {settings.sales_phone_number}")
+    logger.info(f"Support transfer: {settings.support_phone_number or '(not set)'}")
     yield
     await pool.close()
     logger.info("Database pool closed")

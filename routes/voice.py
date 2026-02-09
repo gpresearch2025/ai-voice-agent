@@ -5,10 +5,13 @@ from twilio.twiml.voice_response import VoiceResponse, Gather
 
 from config import settings
 from models import CallRecord, CallStatus as CallStatusEnum
-from database import save_call, update_call_transcript, update_call_voicemail, update_call_status
+from database import (
+    save_call, update_call_transcript, update_call_voicemail,
+    update_call_status, update_call_transferred_to,
+)
 from services.hours import is_business_hours, get_closed_message
 from services.call_manager import call_manager
-from services.agent import get_ai_response, is_sales_transfer, strip_transfer_prefix
+from services.agent import get_ai_response, detect_transfer, strip_transfer_prefix
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice", tags=["Voice Webhooks"])
@@ -73,6 +76,50 @@ async def handle_incoming_call(
     return Response(content=str(response), media_type=TWIML_CONTENT_TYPE)
 
 
+def _build_transfer_twiml(call_sid: str, department: str, transition_message: str) -> VoiceResponse:
+    """Build the TwiML for a transfer based on which numbers are configured."""
+    sales_num = settings.sales_phone_number
+    support_num = settings.support_phone_number
+    has_sales = bool(sales_num and sales_num != "+1234567890")
+    has_support = bool(support_num)
+
+    response = VoiceResponse()
+    response.say(transition_message, voice="Polly.Joanna")
+
+    if has_sales and has_support:
+        # Both numbers configured — present DTMF menu
+        gather = Gather(
+            num_digits=1,
+            action="/voice/transfer",
+            method="POST",
+            timeout=5,
+        )
+        gather.say(
+            "Press 1 for Braydon in Sales. Press 2 for Phong in Support.",
+            voice="Polly.Joanna",
+        )
+        response.append(gather)
+        # Timeout fallback: default to the detected department
+        default_num = sales_num if department == "sales" else support_num
+        default_name = "Braydon" if department == "sales" else "Phong"
+        logger.info(f"DTMF timeout for {call_sid}, defaulting to {default_name}")
+        response.say(f"No selection received. Connecting you to {default_name}.", voice="Polly.Joanna")
+        response.dial(default_num)
+    elif has_sales:
+        response.dial(sales_num)
+    elif has_support:
+        response.dial(support_num)
+    else:
+        response.say(
+            "I'm sorry, we don't have a transfer number configured at the moment. "
+            "Please try calling back later. Goodbye.",
+            voice="Polly.Joanna",
+        )
+        response.hangup()
+
+    return response
+
+
 @router.post("/respond")
 async def handle_response(
     CallSid: str = Form(""),
@@ -88,10 +135,9 @@ async def handle_response(
     openai_messages = call_manager.get_openai_messages(CallSid)
     ai_text = await get_ai_response(openai_messages)
 
-    response = VoiceResponse()
-
-    # Check for sales transfer
-    if is_sales_transfer(ai_text):
+    # Check for transfer intent
+    department = detect_transfer(ai_text)
+    if department:
         transition_message = strip_transfer_prefix(ai_text)
         call_manager.add_turn(CallSid, "assistant", transition_message)
 
@@ -100,15 +146,14 @@ async def handle_response(
         await update_call_transcript(CallSid, transcript)
         await update_call_status(CallSid, CallStatusEnum.TRANSFERRED)
 
-        response.say(transition_message, voice="Polly.Joanna")
-        response.dial(settings.sales_phone_number)
-
-        logger.info(f"Transferring {CallSid} to sales: {settings.sales_phone_number}")
+        response = _build_transfer_twiml(CallSid, department, transition_message)
+        logger.info(f"Transfer detected for {CallSid}: department={department}")
         return Response(content=str(response), media_type=TWIML_CONTENT_TYPE)
 
     # Normal AI reply — speak and gather more input
     call_manager.add_turn(CallSid, "assistant", ai_text)
 
+    response = VoiceResponse()
     gather = Gather(
         input="speech",
         action="/voice/respond",
@@ -124,6 +169,50 @@ async def handle_response(
         "It seems like you may have stepped away. Thank you for calling. Goodbye!",
         voice="Polly.Joanna",
     )
+
+    return Response(content=str(response), media_type=TWIML_CONTENT_TYPE)
+
+
+@router.post("/transfer")
+async def handle_transfer(
+    CallSid: str = Form(""),
+    Digits: str = Form(""),
+):
+    """Handle DTMF digit press from the transfer menu."""
+    logger.info(f"Transfer digit from {CallSid}: {Digits}")
+
+    sales_num = settings.sales_phone_number
+    support_num = settings.support_phone_number
+
+    response = VoiceResponse()
+
+    if Digits == "1" and sales_num:
+        response.say("Connecting you to Braydon now.", voice="Polly.Joanna")
+        response.dial(sales_num)
+        await update_call_transferred_to(CallSid, "sales")
+        logger.info(f"Transferring {CallSid} to Braydon (sales): {sales_num}")
+    elif Digits == "2" and support_num:
+        response.say("Connecting you to Phong now.", voice="Polly.Joanna")
+        response.dial(support_num)
+        await update_call_transferred_to(CallSid, "support")
+        logger.info(f"Transferring {CallSid} to Phong (support): {support_num}")
+    else:
+        # Invalid digit — replay menu once, then default to sales
+        gather = Gather(
+            num_digits=1,
+            action="/voice/transfer",
+            method="POST",
+            timeout=5,
+        )
+        gather.say(
+            "Sorry, that wasn't a valid option. Press 1 for Braydon in Sales. Press 2 for Phong in Support.",
+            voice="Polly.Joanna",
+        )
+        response.append(gather)
+        # Second timeout/invalid — default to Braydon (sales)
+        response.say("Connecting you to Braydon.", voice="Polly.Joanna")
+        response.dial(sales_num)
+        logger.info(f"Invalid digit '{Digits}' from {CallSid}, will default to sales")
 
     return Response(content=str(response), media_type=TWIML_CONTENT_TYPE)
 

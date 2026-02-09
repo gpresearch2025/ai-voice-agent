@@ -23,10 +23,10 @@ ai-voice-agent/
 ├── models.py            # CallRecord, CallStatus, ConfigUpdate
 ├── database.py          # Async PostgreSQL CRUD (asyncpg/Neon) with search/filter
 ├── routes/
-│   ├── voice.py         # 4 Twilio webhook endpoints
+│   ├── voice.py         # 5 Twilio webhook endpoints (incoming, respond, transfer, voicemail, status)
 │   └── api.py           # 6 REST API endpoints (health cached, auth on config)
 ├── services/
-│   ├── agent.py         # Groq AI + sales intent detection
+│   ├── agent.py         # Groq AI + sales/support transfer detection
 │   ├── call_manager.py  # In-memory conversation state
 │   └── hours.py         # Business hours checking (timezone-aware)
 ├── static/
@@ -49,6 +49,7 @@ For local testing with Twilio: `ngrok http 8001`
 - `GROQ_API_KEY` — from console.groq.com (free)
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`
 - `SALES_PHONE_NUMBER` — must include country code (+1...)
+- `SUPPORT_PHONE_NUMBER` — must include country code (+1...), leave empty to disable
 - `BUSINESS_HOURS_START/END` — 24h format (e.g. 09:00, 17:00)
 - `BUSINESS_TIMEZONE` — e.g. America/Chicago
 - `DASHBOARD_TOKEN` — protects `PUT /api/config` (leave empty for open access)
@@ -79,13 +80,25 @@ For local testing with Twilio: `ngrok http 8001`
 ## Call Flow
 1. **Normal call:** Twilio → `/voice/incoming` → check hours → greeting → `/voice/respond` loop (Groq generates replies)
 2. **After hours:** `/voice/incoming` → hours check fails → closed message → `<Record>` voicemail
-3. **Sales transfer:** caller mentions pricing/sales → Groq returns `[TRANSFER_SALES]` prefix (or keyword fallback detects intent) → `<Dial>` to sales number
-4. **Server down:** Twilio falls back to TwiML Bin (static XML)
+3. **Transfer (both numbers set):** caller mentions sales/support topic → Groq returns `[TRANSFER_SALES]` or `[TRANSFER_SUPPORT]` → DTMF menu "Press 1 for Sales. Press 2 for Support." → `/voice/transfer` dials chosen department
+4. **Transfer (one number set):** direct `<Dial>` to whichever number is configured
+5. **Transfer (neither set):** apologize and hang up
+6. **Server down:** Twilio falls back to TwiML Bin (static XML)
 
-## Sales Transfer Detection
+## Transfer Detection
 Two-layer detection in `services/agent.py`:
-1. **Prefix-based:** System prompt instructs Groq to prefix with `[TRANSFER_SALES]`
-2. **Keyword fallback:** Regex catches phrases like "transfer you", "connect you with sales" if AI forgets the prefix
+1. **Prefix-based:** System prompt instructs Groq to prefix with `[TRANSFER_SALES]` or `[TRANSFER_SUPPORT]`
+2. **Keyword fallback:** Regex catches phrases like "transfer you to sales/support" if AI forgets the prefix
+
+### Transfer Edge Cases
+| Scenario | Behavior |
+|----------|----------|
+| Both numbers set | DTMF menu: "Press 1 for Sales, Press 2 for Support" |
+| Only sales set | Direct dial to sales |
+| Only support set | Direct dial to support |
+| Neither set | Apologize message |
+| Invalid digit | Replay menu once, then default to sales |
+| No digit (timeout 5s) | Default to detected department |
 
 ## Important Notes
 - **Port 8000 is used by Laragon** — this project runs on port 8001

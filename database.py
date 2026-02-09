@@ -109,6 +109,13 @@ async def update_call_transcript(call_sid: str, transcript: list[dict]):
     )
 
 
+async def update_call_transferred_to(call_sid: str, transferred_to: str):
+    await _pool.execute(
+        "UPDATE calls SET transferred_to = $1 WHERE call_sid = $2",
+        transferred_to, call_sid,
+    )
+
+
 async def update_call_voicemail(call_sid: str, voicemail_url: str):
     await _pool.execute(
         "UPDATE calls SET voicemail_url = $1, status = $2 WHERE call_sid = $3",
